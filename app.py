@@ -1,18 +1,41 @@
 from flask import Flask, jsonify, request
-import pickle
+from prophet import Prophet
 import pandas as pd
 import os
+import pickle
 
 app = Flask(__name__)
 
-def load_model(product_name):
-    base_dir = os.path.dirname(os.path.abspath(__file__))
-    model_path = os.path.join(base_dir, 'models', f'{product_name}_model.pkl')
-    if not os.path.exists(model_path):
-        return None
-    with open(model_path, 'rb') as f:
-        return pickle.load(f)
+def train_model(product_name):
+    os.makedirs('models', exist_ok=True)
     
+    data = {
+        'ds': pd.date_range(start='2023-01-01', periods=365, freq='D'),
+        'y': [100 + i % 30 + (i % 7) * 5 for i in range(365)]
+    }
+    df = pd.DataFrame(data)
+
+    model = Prophet(yearly_seasonality=True, weekly_seasonality=True)
+    model.add_country_holidays(country_name='IN')
+    model.fit(df)
+
+    with open(f'models/{product_name}_model.pkl', 'wb') as f:
+        pickle.dump(model, f)
+    
+    return model
+
+def load_model(product_name):
+    model_path = f'models/{product_name}_model.pkl'
+    if not os.path.exists(model_path):
+        # Train model if not exists
+        return train_model(product_name)
+    try:
+        with open(model_path, 'rb') as f:
+            return pickle.load(f)
+    except:
+        # If loading fails retrain
+        return train_model(product_name)
+
 @app.route('/')
 def home():
     return jsonify({"message": "Daily Drop ML API is running! 🚀"})
@@ -23,8 +46,6 @@ def predict():
     days = int(request.args.get('days', 30))
 
     model = load_model(product)
-    if not model:
-        return jsonify({"error": f"No model found for {product}"}), 404
 
     future = model.make_future_dataframe(periods=days)
     forecast = model.predict(future)
@@ -41,6 +62,3 @@ def predict():
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=8080)
-
-
-
