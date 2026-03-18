@@ -6,12 +6,13 @@ import os
 app = Flask(__name__)
 
 def load_model(product_name):
-    model_path = f'models/{product_name}_model.pkl'
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    model_path = os.path.join(base_dir, 'models', f'{product_name}_model.pkl')
     if not os.path.exists(model_path):
         return None
     with open(model_path, 'rb') as f:
         return pickle.load(f)
-
+    
 @app.route('/')
 def home():
     return jsonify({"message": "Daily Drop ML API is running! 🚀"})
