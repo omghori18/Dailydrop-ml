@@ -3,3 +3,4 @@ flask
 gunicorn
 pandas
 prophet
+firebase-admin
