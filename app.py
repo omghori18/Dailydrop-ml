@@ -38,7 +38,7 @@ def fetch_firestore_data(provider_id):
     if df.empty:
         return None
 
-    df['ds'] = pd.to_datetime(df['ds'])
+    df['ds'] = pd.to_datetime(df['ds']).dt.tz_localize(None)
     df = df.groupby('ds')['y'].sum().reset_index()
     df = df.sort_values('ds')
     return df
