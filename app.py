@@ -2,10 +2,10 @@ from flask import Flask, jsonify, request
 from prophet import Prophet
 import pandas as pd
 import os
-import pickle
 import json
 import firebase_admin
 from firebase_admin import credentials, firestore
+from datetime import datetime
 
 app = Flask(__name__)
 
@@ -51,12 +51,13 @@ def get_sample_data():
     return pd.DataFrame(data)
 
 def train_model(df):
+    # Works with small data too!
     model = Prophet(
-        yearly_seasonality=True,
+        yearly_seasonality=False,
         weekly_seasonality=True,
-        daily_seasonality=False
+        daily_seasonality=False,
+        changepoint_prior_scale=0.5
     )
-    model.add_country_holidays(country_name='IN')
     model.fit(df)
     return model
 
@@ -67,17 +68,18 @@ def home():
 @app.route('/predict')
 def predict():
     provider_id = request.args.get('providerId', '')
-    product = request.args.get('product', 'milk')
+    product = request.args.get('product', 'Milk')
     days = int(request.args.get('days', 30))
 
     # Try real Firestore data first
     df = None
     if provider_id:
         df = fetch_firestore_data(provider_id)
+        print(f"Records found: {len(df) if df is not None else 0}")
 
-    # Fallback to sample data
-    if df is None or len(df) < 10:
-        print("Using sample data...")
+    # Use sample data only if less than 5 records
+    if df is None or len(df) < 5:
+        print("Not enough data, using sample data...")
         df = get_sample_data()
 
     model = train_model(df)
@@ -86,6 +88,10 @@ def predict():
 
     result = forecast[['ds', 'yhat', 'yhat_lower', 'yhat_upper']].tail(days)
     result['ds'] = result['ds'].astype(str)
+
+    # Make sure no negative predictions
+    result['yhat'] = result['yhat'].clip(lower=0)
+    result['yhat_lower'] = result['yhat_lower'].clip(lower=0)
 
     return jsonify({
         "product": product,
