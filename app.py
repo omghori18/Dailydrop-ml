@@ -1,5 +1,4 @@
 from flask import Flask, jsonify, request
-import pandas as pd
 import os
 import json
 import firebase_admin
@@ -19,111 +18,157 @@ else:
 firebase_admin.initialize_app(cred)
 db = firestore.client()
 
-def fetch_customer_data(provider_id, service_type):
-    print(f"Fetching customers for: {service_type}")
+def fetch_and_categorize(provider_id):
+    print(f"Fetching all active customers for provider: {provider_id}")
+
     customers = db.collection('customers')\
         .where('providerId', '==', provider_id)\
         .where('status', '==', 'ACTIVE')\
         .stream()
 
-    total_daily = 0
-    customer_count = 0
-    customer_list = []
+    # Category wise data
+    categories = {}
 
     for customer in customers:
         data = customer.to_dict()
-        if data.get('serviceType', '').lower() == service_type.lower():
-            qty = float(data.get('defaultQuantity', 0))
-            rate = float(data.get('ratePerUnit', 0))
-            total_daily += qty
-            customer_count += 1
-            customer_list.append({
-                "name": data.get('name', 'Unknown'),
-                "daily_quantity": qty,
-                "rate_per_unit": rate,
-                "monthly_amount": round(qty * rate * 30, 2)
-            })
+        service_type = data.get('serviceType', '').strip()
+        if not service_type:
+            continue
 
-    return total_daily, customer_count, customer_list
+        qty = float(data.get('defaultQuantity', 0))
+        rate = float(data.get('ratePerUnit', 0))
+        name = data.get('name', 'Unknown')
 
-def fetch_service_entries(provider_id):
-    print(f"Fetching service entries...")
-    entries = db.collection('serviceEntries')\
-        .where('providerId', '==', provider_id)\
-        .stream()
+        if service_type not in categories:
+            categories[service_type] = {
+                'customers': [],
+                'total_daily_quantity': 0,
+                'total_daily_revenue': 0
+            }
 
-    records = []
-    for entry in entries:
-        data = entry.to_dict()
-        qty = float(data.get('quantity', 0))
-        if qty > 0:
-            records.append(qty)
+        categories[service_type]['customers'].append({
+            'name': name,
+            'daily_quantity': qty,
+            'rate_per_unit': rate
+        })
+        categories[service_type]['total_daily_quantity'] += qty
+        categories[service_type]['total_daily_revenue'] += qty * rate
 
-    return records
+    return categories
 
 @app.route('/')
 def home():
     return jsonify({"message": "Daily Drop ML API is running! 🚀"})
 
-@app.route('/predict')
-def predict():
+@app.route('/predict/all')
+def predict_all():
     provider_id = request.args.get('providerId', '')
-    product = request.args.get('product', 'Milk')
     days = int(request.args.get('days', 30))
 
     if not provider_id:
         return jsonify({"error": "providerId is required"}), 400
 
-    # Get customer default quantities
-    total_daily, customer_count, customer_list = fetch_customer_data(
-        provider_id, product
+    # Fetch and categorize all customers
+    categories = fetch_and_categorize(provider_id)
+
+    if not categories:
+        return jsonify({
+            "error": "No active customers found for this provider"
+        }), 404
+
+    # Build predictions category wise
+    predictions = {}
+
+    for service_type, data in categories.items():
+        daily_qty = data['total_daily_quantity']
+        daily_rev = data['total_daily_revenue']
+
+        # Generate daily breakdown
+        daily_breakdown = []
+        today = datetime.today()
+        for i in range(1, days + 1):
+            future_date = today + timedelta(days=i)
+            daily_breakdown.append({
+                "date": future_date.strftime('%Y-%m-%d'),
+                "predicted_quantity": round(daily_qty, 2),
+                "predicted_revenue": round(daily_rev, 2)
+            })
+
+        predictions[service_type] = {
+            "active_customers": len(data['customers']),
+            "daily_quantity": round(daily_qty, 2),
+            "daily_revenue": round(daily_rev, 2),
+            "total_predicted_quantity": round(daily_qty * days, 2),
+            "total_predicted_revenue": round(daily_rev * days, 2),
+            "customer_breakdown": data['customers'],
+            "daily": daily_breakdown
+        }
+
+    # Overall summary
+    total_revenue = sum(
+        p['total_predicted_revenue'] for p in predictions.values()
+    )
+    total_quantity = sum(
+        p['total_predicted_quantity'] for p in predictions.values()
     )
 
-    # Get historical average from service entries
-    historical = fetch_service_entries(provider_id)
-    if historical:
-        avg_historical = sum(historical) / len(historical)
-    else:
-        avg_historical = total_daily
-
-    # Use best available data
-    if total_daily > 0:
-        daily_prediction = total_daily
-        source = "customer_default_quantity"
-    elif avg_historical > 0:
-        daily_prediction = avg_historical
-        source = "historical_average"
-    else:
-        daily_prediction = 10
-        source = "fallback"
-
-    # Generate daily predictions
-    daily_breakdown = []
-    today = datetime.today()
-    for i in range(1, days + 1):
-        future_date = today + timedelta(days=i)
-        daily_breakdown.append({
-            "ds": future_date.strftime('%Y-%m-%d'),
-            "predicted_quantity": round(daily_prediction, 2)
-        })
-
-    total_predicted = round(daily_prediction * days, 2)
-    total_revenue = round(
-        sum(c['monthly_amount'] for c in customer_list), 2
-    ) if customer_list else 0
-
     return jsonify({
-        "product": product,
         "provider_id": provider_id,
         "days": days,
-        "prediction_source": source,
-        "daily_quantity": round(daily_prediction, 2),
-        "total_predicted_quantity": total_predicted,
-        "estimated_revenue": total_revenue,
-        "active_customers": customer_count,
-        "customer_breakdown": customer_list,
-        "daily": daily_breakdown
+        "total_categories": len(predictions),
+        "overall_predicted_quantity": round(total_quantity, 2),
+        "overall_predicted_revenue": round(total_revenue, 2),
+        "category_predictions": predictions
     })
+
+@app.route('/predict')
+def predict():
+    provider_id = request.args.get('providerId', '')
+    product = request.args.get('product', '')
+    days = int(request.args.get('days', 30))
+
+    if not provider_id:
+        return jsonify({"error": "providerId is required"}), 400
+
+    categories = fetch_and_categorize(provider_id)
+
+    if product and product in categories:
+        data = categories[product]
+        daily_qty = data['total_daily_quantity']
+        daily_rev = data['total_daily_revenue']
+
+        daily_breakdown = []
+        today = datetime.today()
+        for i in range(1, days + 1):
+            future_date = today + timedelta(days=i)
+            daily_breakdown.append({
+                "date": future_date.strftime('%Y-%m-%d'),
+                "predicted_quantity": round(daily_qty, 2),
+                "predicted_revenue": round(daily_rev, 2)
+            })
+
+        return jsonify({
+            "product": product,
+            "provider_id": provider_id,
+            "days": days,
+            "active_customers": len(data['customers']),
+            "daily_quantity": round(daily_qty, 2),
+            "daily_revenue": round(daily_rev, 2),
+            "total_predicted_quantity": round(daily_qty * days, 2),
+            "total_predicted_revenue": round(daily_rev * days, 2),
+            "customer_breakdown": data['customers'],
+            "daily": daily_breakdown
+        })
+
+    elif not product:
+        # Return all categories if no product specified
+        return predict_all()
+
+    else:
+        return jsonify({
+            "error": f"No active customers found for {product}",
+            "available_categories": list(categories.keys())
+        }), 404
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=8080)
