@@ -1,6 +1,7 @@
 from flask import Flask, jsonify, request
 import os
 import json
+import pickle
 import firebase_admin
 from firebase_admin import credentials, firestore
 from datetime import datetime, timedelta
@@ -17,6 +18,24 @@ else:
 
 firebase_admin.initialize_app(cred)
 db = firestore.client()
+
+# Load ML models with error handling
+models = {}
+try:
+    with open('models/milk_model.pkl', 'rb') as f:
+        models['milk'] = pickle.load(f)
+    print("Milk model loaded successfully")
+except Exception as e:
+    print(f"Error loading milk model: {e}")
+    models['milk'] = None
+
+try:
+    with open('models/newspaper_model.pkl', 'rb') as f:
+        models['newspaper'] = pickle.load(f)
+    print("Newspaper model loaded successfully")
+except Exception as e:
+    print(f"Error loading newspaper model: {e}")
+    models['newspaper'] = None
 
 def fetch_and_categorize(provider_id):
     print(f"Fetching all active customers for provider: {provider_id}")
