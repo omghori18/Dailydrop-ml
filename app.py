@@ -2,9 +2,13 @@ from flask import Flask, jsonify, request
 import os
 import json
 import pickle
+import warnings
 import firebase_admin
 from firebase_admin import credentials, firestore
 from datetime import datetime, timedelta
+
+# Suppress all warnings for cleaner production logs
+warnings.filterwarnings('ignore')
 
 app = Flask(__name__)
 
@@ -40,7 +44,7 @@ try:
         model_status['milk'] = True
     print("Milk model loaded successfully")
 except Exception as e:
-    print(f"Error loading milk model: {e}")
+    # Suppress model loading errors in production logs - they're handled gracefully
     models['milk'] = None
     model_status['milk'] = False
 
@@ -50,7 +54,7 @@ try:
         model_status['newspaper'] = True
     print("Newspaper model loaded successfully")
 except Exception as e:
-    print(f"Error loading newspaper model: {e}")
+    # Suppress model loading errors in production logs - they're handled gracefully
     models['newspaper'] = None
     model_status['newspaper'] = False
 
