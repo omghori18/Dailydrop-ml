@@ -11,11 +11,16 @@ app = Flask(__name__)
 # 🔥 Firebase Initialization (FIXED)
 firebase_json = os.environ.get('FIREBASE_CREDENTIALS')
 
-if not firebase_json:
-    raise Exception("FIREBASE_CREDENTIALS is missing. Set it in Railway variables.")
-
-firebase_dict = json.loads(firebase_json)
-cred = credentials.Certificate(firebase_dict)
+if firebase_json:
+    # Production: use environment variable
+    firebase_dict = json.loads(firebase_json)
+    cred = credentials.Certificate(firebase_dict)
+elif os.path.exists('serviceAccount.json'):
+    # Local development: use serviceAccount.json file
+    cred = credentials.Certificate('serviceAccount.json')
+    print("Using local serviceAccount.json for Firebase")
+else:
+    raise Exception("FIREBASE_CREDENTIALS environment variable is missing and serviceAccount.json not found. Set FIREBASE_CREDENTIALS in environment variables.")
 
 if not firebase_admin._apps:
     firebase_admin.initialize_app(cred)
@@ -24,21 +29,34 @@ db = firestore.client()
 
 # Load ML models with error handling
 models = {}
+model_status = {
+    'milk': False,
+    'newspaper': False
+}
+
 try:
     with open('models/milk_model.pkl', 'rb') as f:
         models['milk'] = pickle.load(f)
+        model_status['milk'] = True
     print("Milk model loaded successfully")
 except Exception as e:
     print(f"Error loading milk model: {e}")
     models['milk'] = None
+    model_status['milk'] = False
 
 try:
     with open('models/newspaper_model.pkl', 'rb') as f:
         models['newspaper'] = pickle.load(f)
+        model_status['newspaper'] = True
     print("Newspaper model loaded successfully")
 except Exception as e:
     print(f"Error loading newspaper model: {e}")
     models['newspaper'] = None
+    model_status['newspaper'] = False
+
+print(f"Model status - Milk: {model_status['milk']}, Newspaper: {model_status['newspaper']}")
+if not any(model_status.values()):
+    print("WARNING: No ML models loaded. Using simple prediction fallback.")
 
 def fetch_and_categorize(provider_id):
     customers = db.collection('customers') \
@@ -80,7 +98,24 @@ def fetch_and_categorize(provider_id):
 
 @app.route('/')
 def home():
-    return jsonify({"message": "Daily Drop API running 🚀"})
+    return jsonify({
+        "message": "Daily Drop API running 🚀",
+        "model_status": model_status,
+        "models_loaded": sum(model_status.values()),
+        "total_models": len(model_status)
+    })
+
+
+@app.route('/status')
+def status():
+    return jsonify({
+        "status": "healthy" if any(model_status.values()) else "limited",
+        "models": model_status,
+        "models_loaded": sum(model_status.values()),
+        "total_models": len(model_status),
+        "prediction_method": "ML" if any(model_status.values()) else "simple_fallback",
+        "note": "ML models failed to load due to pandas compatibility. Using simple prediction fallback." if not any(model_status.values()) else "ML models loaded successfully"
+    })
 
 
 @app.route('/predict/all')
@@ -120,7 +155,9 @@ def predict_all():
             "total_predicted_quantity": round(daily_qty * days, 2),
             "total_predicted_revenue": round(daily_rev * days, 2),
             "customer_breakdown": data['customers'],
-            "daily": daily_breakdown
+            "daily": daily_breakdown,
+            "prediction_method": "simple_fallback",
+            "note": "Using simple prediction (repeating current values) due to ML model loading failure"
         }
 
     total_revenue = sum(p['total_predicted_revenue'] for p in predictions.values())
@@ -132,7 +169,10 @@ def predict_all():
         "total_categories": len(predictions),
         "overall_predicted_quantity": round(total_quantity, 2),
         "overall_predicted_revenue": round(total_revenue, 2),
-        "category_predictions": predictions
+        "category_predictions": predictions,
+        "prediction_method": "simple_fallback",
+        "note": "Using simple prediction (repeating current values) due to ML model loading failure",
+        "model_status": model_status
     })
 
 
@@ -173,7 +213,9 @@ def predict():
             "total_predicted_quantity": round(daily_qty * days, 2),
             "total_predicted_revenue": round(daily_rev * days, 2),
             "customer_breakdown": data['customers'],
-            "daily": daily_breakdown
+            "daily": daily_breakdown,
+            "prediction_method": "simple_fallback",
+            "note": "Using simple prediction (repeating current values) due to ML model loading failure"
         })
 
     elif not product:
