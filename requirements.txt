@@ -4,3 +4,4 @@ gunicorn
 pandas
 prophet
 firebase-admin
+plotly

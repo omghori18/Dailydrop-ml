@@ -6,7 +6,7 @@ RUN apt-get update && apt-get install -y gcc g++ && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
 
-RUN pip install --no-cache-dir flask gunicorn pandas prophet firebase-admin
+RUN pip install --no-cache-dir flask gunicorn pandas prophet firebase-admin plotly
 
 COPY . .
 
