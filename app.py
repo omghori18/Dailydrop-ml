@@ -7,30 +7,32 @@ from datetime import datetime, timedelta
 
 app = Flask(__name__)
 
-# Initialize Firebase
+# 🔥 Firebase Initialization (FIXED)
 firebase_json = os.environ.get('FIREBASE_CREDENTIALS')
-if firebase_json:
-    firebase_dict = json.loads(firebase_json)
-    cred = credentials.Certificate(firebase_dict)
-else:
-    cred = credentials.Certificate('serviceAccount.json')
 
-firebase_admin.initialize_app(cred)
+if not firebase_json:
+    raise Exception("FIREBASE_CREDENTIALS is missing. Set it in Railway variables.")
+
+firebase_dict = json.loads(firebase_json)
+cred = credentials.Certificate(firebase_dict)
+
+if not firebase_admin._apps:
+    firebase_admin.initialize_app(cred)
+
 db = firestore.client()
 
-def fetch_and_categorize(provider_id):
-    print(f"Fetching all active customers for provider: {provider_id}")
 
-    customers = db.collection('customers')\
-        .where('providerId', '==', provider_id)\
-        .where('status', '==', 'ACTIVE')\
+def fetch_and_categorize(provider_id):
+    customers = db.collection('customers') \
+        .where('providerId', '==', provider_id) \
+        .where('status', '==', 'ACTIVE') \
         .stream()
 
-    # Category wise data
     categories = {}
 
     for customer in customers:
         data = customer.to_dict()
+
         service_type = data.get('serviceType', '').strip()
         if not service_type:
             continue
@@ -51,14 +53,17 @@ def fetch_and_categorize(provider_id):
             'daily_quantity': qty,
             'rate_per_unit': rate
         })
+
         categories[service_type]['total_daily_quantity'] += qty
         categories[service_type]['total_daily_revenue'] += qty * rate
 
     return categories
 
+
 @app.route('/')
 def home():
-    return jsonify({"message": "Daily Drop ML API is running! 🚀"})
+    return jsonify({"message": "Daily Drop API running 🚀"})
+
 
 @app.route('/predict/all')
 def predict_all():
@@ -68,24 +73,20 @@ def predict_all():
     if not provider_id:
         return jsonify({"error": "providerId is required"}), 400
 
-    # Fetch and categorize all customers
     categories = fetch_and_categorize(provider_id)
 
     if not categories:
-        return jsonify({
-            "error": "No active customers found for this provider"
-        }), 404
+        return jsonify({"error": "No active customers found"}), 404
 
-    # Build predictions category wise
     predictions = {}
 
     for service_type, data in categories.items():
         daily_qty = data['total_daily_quantity']
         daily_rev = data['total_daily_revenue']
 
-        # Generate daily breakdown
-        daily_breakdown = []
         today = datetime.today()
+        daily_breakdown = []
+
         for i in range(1, days + 1):
             future_date = today + timedelta(days=i)
             daily_breakdown.append({
@@ -104,13 +105,8 @@ def predict_all():
             "daily": daily_breakdown
         }
 
-    # Overall summary
-    total_revenue = sum(
-        p['total_predicted_revenue'] for p in predictions.values()
-    )
-    total_quantity = sum(
-        p['total_predicted_quantity'] for p in predictions.values()
-    )
+    total_revenue = sum(p['total_predicted_revenue'] for p in predictions.values())
+    total_quantity = sum(p['total_predicted_quantity'] for p in predictions.values())
 
     return jsonify({
         "provider_id": provider_id,
@@ -120,6 +116,7 @@ def predict_all():
         "overall_predicted_revenue": round(total_revenue, 2),
         "category_predictions": predictions
     })
+
 
 @app.route('/predict')
 def predict():
@@ -137,8 +134,9 @@ def predict():
         daily_qty = data['total_daily_quantity']
         daily_rev = data['total_daily_revenue']
 
-        daily_breakdown = []
         today = datetime.today()
+        daily_breakdown = []
+
         for i in range(1, days + 1):
             future_date = today + timedelta(days=i)
             daily_breakdown.append({
@@ -161,14 +159,10 @@ def predict():
         })
 
     elif not product:
-        # Return all categories if no product specified
         return predict_all()
 
     else:
         return jsonify({
-            "error": f"No active customers found for {product}",
+            "error": f"No data found for {product}",
             "available_categories": list(categories.keys())
         }), 404
-
-if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=8080)
