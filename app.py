@@ -1,14 +1,19 @@
-from flask import Flask, jsonify, request
-import os
-import json
-import pickle
 import warnings
-import firebase_admin
-from firebase_admin import credentials, firestore
-from datetime import datetime, timedelta
+import sys
+import os
 
 # Suppress all warnings for cleaner production logs
 warnings.filterwarnings('ignore')
+# Specifically suppress Google API warnings
+warnings.filterwarnings('ignore', module='google.api_core')
+warnings.filterwarnings('ignore', category=FutureWarning)
+
+from flask import Flask, jsonify, request
+import json
+import pickle
+import firebase_admin
+from firebase_admin import credentials, firestore
+from datetime import datetime, timedelta
 
 app = Flask(__name__)
 
@@ -38,25 +43,29 @@ model_status = {
     'newspaper': False
 }
 
-try:
-    with open('models/milk_model.pkl', 'rb') as f:
-        models['milk'] = pickle.load(f)
-        model_status['milk'] = True
-    print("Milk model loaded successfully")
-except Exception as e:
-    # Suppress model loading errors in production logs - they're handled gracefully
-    models['milk'] = None
-    model_status['milk'] = False
+# Suppress warnings during model loading
+with warnings.catch_warnings():
+    warnings.simplefilter("ignore")
+    
+    try:
+        with open('models/milk_model.pkl', 'rb') as f:
+            models['milk'] = pickle.load(f)
+            model_status['milk'] = True
+        print("Milk model loaded successfully")
+    except Exception as e:
+        # Suppress model loading errors in production logs - they're handled gracefully
+        models['milk'] = None
+        model_status['milk'] = False
 
-try:
-    with open('models/newspaper_model.pkl', 'rb') as f:
-        models['newspaper'] = pickle.load(f)
-        model_status['newspaper'] = True
-    print("Newspaper model loaded successfully")
-except Exception as e:
-    # Suppress model loading errors in production logs - they're handled gracefully
-    models['newspaper'] = None
-    model_status['newspaper'] = False
+    try:
+        with open('models/newspaper_model.pkl', 'rb') as f:
+            models['newspaper'] = pickle.load(f)
+            model_status['newspaper'] = True
+        print("Newspaper model loaded successfully")
+    except Exception as e:
+        # Suppress model loading errors in production logs - they're handled gracefully
+        models['newspaper'] = None
+        model_status['newspaper'] = False
 
 print(f"Model status - Milk: {model_status['milk']}, Newspaper: {model_status['newspaper']}")
 if not any(model_status.values()):
